@@ -1,33 +1,22 @@
 import { inject, Injectable, signal, WritableSignal, computed } from '@angular/core';
 import { firestore } from '../firebase-config';
 import { collection, CollectionReference, doc, DocumentData, DocumentReference, DocumentSnapshot, getDoc, getDocs, limit, onSnapshot, orderBy, OrderByDirection, query, QuerySnapshot, startAfter, where } from 'firebase/firestore';
+
 import { StatesGlobal } from '../../states/states.global';
 import { ProductInterface } from '../../interfaces/products/product-interface';
 
-export type CollectionName = string;
+// Tipos para mejorar la seguridad de tipos
+export type CollectionName = 'string'; 
+export interface PaginatedResult<T extends DocumentData> { data: (T & { id: string })[]; lastDocument: DocumentSnapshot<T> | null; hasMore: boolean; }
+export interface Paginacion {  orderByField: string;  orderDirection: OrderByDirection;  itemsByPage: number;}
+export interface Filtros {  field: string;  value: any;  operator: '==' | '>' | '<' | '>=' | '<=' | 'array-contains';}
 
-export interface PaginatedResult<T extends DocumentData> {
-  data: (T & { id: string })[];
-  lastDocument: DocumentSnapshot<T> | null;
-  hasMore: boolean;
-}
 
-export interface Paginacion {
-  orderByField: string;
-  orderDirection: OrderByDirection;
-  itemsByPage: number;
-}
-
-export interface Filtros {
-  field: string;
-  value: any;
-  operator: '==' | '>' | '<' | '>=' | '<=' | 'array-contains';
-}
 
 @Injectable({
   providedIn: 'root'
 })
-export class ReadService<T extends DocumentData> {
+export class ReadService <T extends DocumentData> {
 
   private statesGlobal = inject(StatesGlobal);
 
@@ -75,6 +64,7 @@ export class ReadService<T extends DocumentData> {
     filtros?: Filtros[]
   ): Promise<(T & { id: string })[]> {
     try {
+      this.statesGlobal.setLoading();
       const colRef = collection(firestore, collectionName) as CollectionReference<T>;
       let q: any = query(colRef);
 
@@ -89,8 +79,15 @@ export class ReadService<T extends DocumentData> {
       }
 
       const snapshot = await getDocs(q);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
-    } catch (error) {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
+      if (data.length === 0) {
+        this.statesGlobal.setEmpty();
+      } else {
+        this.statesGlobal.setSuccess();
+      }
+      return data;
+    } catch (error: any) {
+      this.statesGlobal.setError(error.message);
       throw error;
     }
   }
@@ -100,13 +97,17 @@ export class ReadService<T extends DocumentData> {
     id: string
   ): Promise<(T & { id: string }) | null> {
     try {
+      this.statesGlobal.setLoading();
       const docRef = doc(firestore, collectionName, id) as DocumentReference<T>;
       const snapshot = await getDoc(docRef);
       if (!snapshot.exists()) {
+        this.statesGlobal.setEmpty();
         return null;
       }
+      this.statesGlobal.setSuccess();
       return { id: snapshot.id, ...snapshot.data() } as (T & { id: string });
-    } catch (error) {
+    } catch (error: any) {
+      this.statesGlobal.setError(error.message);
       throw error;
     }
   }
@@ -117,10 +118,18 @@ export class ReadService<T extends DocumentData> {
     subcollection: string
   ): Promise<(T & { id: string })[]> {
     try {
+      this.statesGlobal.setLoading();
       const colRef = collection(firestore, parentCollection, parentId, subcollection) as CollectionReference<T>;
       const snapshot = await getDocs(colRef);
-      return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
-    } catch (error) {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
+      if (data.length === 0) {
+        this.statesGlobal.setEmpty();
+      } else {
+        this.statesGlobal.setSuccess();
+      }
+      return data;
+    } catch (error: any) {
+      this.statesGlobal.setError(error.message);
       throw error;
     }
   }
@@ -132,6 +141,12 @@ export class ReadService<T extends DocumentData> {
     startAfterDoc?: DocumentSnapshot<T> | null
   ): Promise<PaginatedResult<T>> {
     try {
+      if (startAfterDoc) {
+        this.statesGlobal.startPaginating();
+      } else {
+        this.statesGlobal.setLoading();
+      }
+
       const colRef = collection(firestore, collectionName) as CollectionReference<T>;
       let q: any = query(colRef);
 
@@ -154,9 +169,23 @@ export class ReadService<T extends DocumentData> {
       const newLastDocument: DocumentSnapshot<T> | null = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] as DocumentSnapshot<T> : null;
       const hasMore = snapshot.docs.length === paginacion.itemsByPage;
 
+      if (startAfterDoc) {
+        this.statesGlobal.stopPaginating();
+      } else {
+        if (data.length === 0) {
+          this.statesGlobal.setEmpty();
+        } else {
+          this.statesGlobal.setSuccess();
+        }
+      }
       return { data, lastDocument: newLastDocument, hasMore };
-    } catch (error) {
+    } catch (error: any) {
+      if (startAfterDoc) {
+        this.statesGlobal.stopPaginating();
+      }
+      this.statesGlobal.setError(error.message);
       throw error;
     }
   }
+  
 }
