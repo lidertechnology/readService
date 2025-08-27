@@ -33,17 +33,7 @@ export class ReadService<T extends DocumentData> {
 
   private _items: WritableSignal<(T & {id: string})[]> = signal([]);
 
-  items = computed(() => {
-    return this._items().map(doc => {
-      const productData = doc as unknown as ProductInterface;
-      return {
-        ...productData,
-        features: (typeof productData.description === 'string')
-                  ? productData.description.split(',').map(feature => feature.trim())
-                  : []
-      };
-    });
-  });
+  items = computed(() => this._items());
 
   lastDoc: WritableSignal<DocumentSnapshot<T> | null> = signal(null);
 
