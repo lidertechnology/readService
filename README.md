@@ -138,6 +138,16 @@ public buscarPorCategoriaYColor(categoria: string, color: string): void {
 }
 ```
 
+
+Cómo los Tipos Genéricos Mantienen el Potencial
+Tu servicio es una clase genérica, definida como ReadService<T>.
+
+T es un marcador de posición. Cuando inyectas el servicio en un componente, le dices qué tipo de dato es T. Por ejemplo, inject(ReadService<ProductInterface>) le dice al servicio que, para este componente, T es igual a ProductInterface.
+
+Adaptabilidad sin Pérdida: Tu servicio no tiene que saber qué es un ProductInterface o un GalleryInterface. Simplemente sabe que manejará un objeto que debe tener una estructura compatible con Firestore (T extends DocumentData). El servicio hace la llamada a la base de datos, y TypeScript se encarga de que los datos devueltos se ajusten a la interfaz que especificaste.
+
+Esta flexibilidad es la razón por la que el servicio es tan poderoso. Se adapta a la interfaz de cada componente, manteniendo la misma lógica de paginación, filtros y estado para cualquier tipo de dato. Es una única API para todas las lecturas, sin importar la complejidad o el tipo de dato que manejes.
+
 -----
 
 ### **Conclusión**
