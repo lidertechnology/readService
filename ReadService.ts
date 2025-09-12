@@ -1,6 +1,6 @@
 import { inject, Injectable, signal, WritableSignal, computed } from '@angular/core';
 import { firestore } from '../firebase-config';
-import { collection, CollectionReference, doc, DocumentData, DocumentReference, DocumentSnapshot, getDoc, getDocs, limit, onSnapshot, orderBy, OrderByDirection, query, QuerySnapshot, startAfter, where } from 'firebase/firestore';
+import { collection, CollectionReference, DocumentData, DocumentSnapshot, getDocs, limit, onSnapshot, orderBy, OrderByDirection, query, QuerySnapshot, startAfter, Unsubscribe, where } from 'firebase/firestore';
 
 import { StatesGlobal } from '../../states/states.global';
 
@@ -19,8 +19,7 @@ export class ReadService <T extends DocumentData> {
 
   private statesGlobal = inject(StatesGlobal);
 
-  // ✅ Señales privadas y públicas para gestionar los datos
-  private _items: WritableSignal<(T & {id: string})[]> = signal([]);
+  private _items: WritableSignal<(T & { id: string })[]> = signal([]);
   public items = computed(() => this._items());
 
   public lastDoc: WritableSignal<DocumentSnapshot<T> | null> = signal(null);
@@ -29,14 +28,26 @@ export class ReadService <T extends DocumentData> {
   public paginating = this.statesGlobal.paginating;
   public states = this.statesGlobal.states;
 
+  private unsubscribe: Unsubscribe | null = null;
+
   constructor() { }
 
-  public async obtenerDocumentos(
+  ngOnDestroy(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+    }
+  }
+
+  public obtenerDocumentos(
     collectionName: string,
     paginacion: Paginacion,
     filtros?: Filtros[]
-  ): Promise<void> {
+  ): void {
     try {
+      if (this.unsubscribe) {
+        this.unsubscribe();
+      }
+
       this.statesGlobal.setLoading();
       this._items.set([]);
       this.lastDoc.set(null);
@@ -53,18 +64,23 @@ export class ReadService <T extends DocumentData> {
 
       q = query(q, orderBy(paginacion.orderByField, paginacion.orderDirection), limit(paginacion.itemsByPage));
 
-      const snapshot = await getDocs(q);
-      const data: (T & { id: string })[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
-      
-      this._items.set(data);
-      this.lastDoc.set(snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] as DocumentSnapshot<T> : null);
-      this.hasMore.set(snapshot.docs.length === paginacion.itemsByPage);
+      this.unsubscribe = onSnapshot(q, (snapshot: QuerySnapshot<T>) => {
+        const data: (T & { id: string })[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
+        this._items.set(data);
+        this.lastDoc.set(snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] as DocumentSnapshot<T> : null);
+        this.hasMore.set(snapshot.docs.length === paginacion.itemsByPage);
 
-      if (data.length === 0) {
-        this.statesGlobal.setEmpty();
-      } else {
-        this.statesGlobal.setSuccess();
-      }
+        if (data.length === 0) {
+          this.statesGlobal.setEmpty();
+        } else {
+          this.statesGlobal.setSuccess();
+        }
+      }, (error: any) => {
+        this.statesGlobal.setError(error.message);
+        this.hasMore.set(false);
+        this.unsubscribe = null;
+      });
+
     } catch (error: any) {
       this.statesGlobal.setError(error.message);
       this.hasMore.set(false);
@@ -78,7 +94,7 @@ export class ReadService <T extends DocumentData> {
   ): Promise<void> {
     const startAfterDoc = this.lastDoc();
     if (!startAfterDoc) return;
-    
+
     try {
       this.statesGlobal.startPaginating();
 
@@ -93,7 +109,7 @@ export class ReadService <T extends DocumentData> {
 
       q = query(q, orderBy(paginacion.orderByField, paginacion.orderDirection), startAfter(startAfterDoc), limit(paginacion.itemsByPage));
 
-      const snapshot = await getDocs(q);
+      const snapshot: QuerySnapshot<T> = await getDocs(q);
       const data: (T & { id: string })[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as T }));
 
       this._items.update(currentItems => [...currentItems, ...data]);
