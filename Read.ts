@@ -29,9 +29,9 @@ export class Read <T extends DocumentData> {
 
   private unsubscribe: Unsubscribe | null = null;
 
-  ngOnDestroy(): void {    if (this.unsubscribe) {      this.unsubscribe();    }  }
+  ngOnDestroy(): void {     if (this.unsubscribe) {       this.unsubscribe();     }   }
 
-  public obtenerDocumentos( collectionName: string, paginacion: Paginacion, filtros?: Filtros[]  ): void {
+  public obtenerDocumentos( collectionName: string, paginacion: Paginacion, filtros?: Filtros[]   ): void {
     try { if (this.unsubscribe) { this.unsubscribe(); }
 
       this._stateEnumRead.set(StateEnum.CARGANDO);
@@ -42,7 +42,7 @@ export class Read <T extends DocumentData> {
       const colRef = collection(this.firestore, collectionName) as CollectionReference<T>;
       let q: any = query(colRef);
 
-      if (filtros) { for (const filter of filtros) { q = query(q, where(filter.field, filter.operator, filter.value)); }  }
+      if (filtros) { for (const filter of filtros) { q = query(q, where(filter.field, filter.operator, filter.value)); }   }
 
       q = query(q, orderBy(paginacion.orderByField, paginacion.orderDirection), limit(paginacion.itemsByPage));
 
@@ -53,13 +53,13 @@ export class Read <T extends DocumentData> {
         this.hasMore.set(snapshot.docs.length === paginacion.itemsByPage);
 
         if (data.length === 0) { this._stateEnumRead.set(StateEnum.SIN_RESULTADOS); } else { this._stateEnumRead.set(StateEnum.EXITO); }
-      }, (error: any) => { this._stateEnumRead.set(StateEnum.ERROR); this.hasMore.set(false); this.unsubscribe = null;      });
+      }, (error: any) => { this._stateEnumRead.set(StateEnum.ERROR); this.hasMore.set(false); this.unsubscribe = null;       });
 
     } 
     catch (error: any) { this._stateEnumRead.set(StateEnum.ERROR); this.hasMore.set(false); }
   }
 
-  public async cargarMasDocumentos(    collectionName: string,    paginacion: Paginacion,    filtros?: Filtros[]  ): Promise<void> {
+  public async cargarMasDocumentos(    collectionName: string,    paginacion: Paginacion,    filtros?: Filtros[]   ): Promise<void> {
     const startAfterDoc = this.lastDoc();
     if (!startAfterDoc) return;
 
@@ -69,7 +69,7 @@ export class Read <T extends DocumentData> {
       const colRef = collection(this.firestore, collectionName) as CollectionReference<T>;
       let q: any = query(colRef);
 
-      if (filtros) {        for (const filter of filtros) {          q = query(q, where(filter.field, filter.operator, filter.value));        }      }
+      if (filtros) {       for (const filter of filtros) {         q = query(q, where(filter.field, filter.operator, filter.value));       }       }
 
       q = query(q, orderBy(paginacion.orderByField, paginacion.orderDirection), startAfter(startAfterDoc), limit(paginacion.itemsByPage));
 
@@ -85,6 +85,49 @@ export class Read <T extends DocumentData> {
     catch (error: any) { 
       this._stateEnumRead.set(StateEnum.ERROR);
       this.hasMore.set(false); 
+    }
+  }
+
+  // --- MÉTODO PARA LECTURAS DE "UN SOLO DISPARO" (USADO POR SEARCHCOMPONENT) ---
+
+  public async obtenerDocumentosPorFiltro(
+    collectionName: string,
+    filtros: Filtros[],
+    limite: number = 10 
+  ): Promise<(T & { id: string })[]> {
+
+    // Este método es "stateless":
+    // 1. NO actualiza el estado interno del servicio (this._stateEnumRead).
+    // 2. NO actualiza los signals (this.items).
+    // 3. Devuelve los datos directamente (Promise<T[]>)
+
+    try {
+      const colRef = collection(this.firestore, collectionName) as CollectionReference<T>;
+      let q: any = query(colRef);
+
+      // Aplica los filtros (ej. >= y <= del buscador)
+      for (const filter of filtros) {
+        q = query(q, where(filter.field, filter.operator, filter.value));
+      }
+
+      // Aplica el límite de resultados
+      q = query(q, limit(limite));
+
+      // Ejecuta la consulta de "un solo disparo"
+      const snapshot: QuerySnapshot<T> = await getDocs(q);
+      
+      const data: (T & { id: string })[] = snapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data() as T 
+      }));
+      
+      return data; // Retorna los datos directamente
+
+    } catch (error) {
+      // Relanza el error para que el SearchComponent 
+      // lo capture en su propio try/catch y ponga el estado en ERROR.
+      console.error('Error en obtenerDocumentosPorFiltro:', error);
+      throw error;
     }
   }
 }
