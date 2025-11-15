@@ -1,386 +1,225 @@
+¡Absolutamente\! Has proporcionado un excelente punto de partida.
 
-# Informe Técnico: ReadService (Actualizado)
-El ReadService es el servicio de lectura definitivo para todos tus proyectos Lidertech, diseñado para interactuar con Cloud Firestore de manera genérica, eficiente y escalable. Su arquitectura centralizada elimina la lógica compleja de los componentes, permitiendo un desarrollo más rápido y consistente.
+La principal mejora que necesita ese informe es **incorporar la arquitectura de modo dual** que definimos (Stateful vs. Stateless). Tu informe actual solo describe el *Modo Stateful* (tiempo real), y tu ejemplo de "Buscadores" (Sección C) es incorrecto porque sugiere usar el método `onSnapshot` para una búsqueda, lo cual es ineficiente y acopla el estado, justo lo que solucionamos.
 
-# Capacidades Clave del Servicio
-El servicio se basa en dos métodos principales, que juntos cubren todas las necesidades de lectura de una aplicación moderna:
+Aquí tienes el informe mejorado y completo, listo para tu `README.md`.
 
-obtenerDocumentos(collectionName, paginacion, filtros?)
-Este es el método de consulta principal. Utiliza onSnapshot para proporcionar actualizaciones en tiempo real. 
+-----
 
-Se usa para:
+## 🚀 Informe Técnico Mejorado: ReadService (Arquitectura Dual)
 
-* Lectura en Tiempo Real: Establece un listener que se actualiza automáticamente cada vez que los datos cambian en Firestore.
+El `ReadService` es el servicio de lectura **único y genérico** de Lidertech para todas las operaciones de Cloud Firestore. Su arquitectura centralizada elimina la lógica compleja de los componentes y garantiza la consistencia.
 
-* Carga Inicial: Obtiene la primera página de documentos.
+Para ser la solución definitiva, el `ReadService` opera en **dos modos distintos** para cubrir todas las necesidades de una aplicación Lidertech, evitando conflictos de estado.
 
-* Ordenamiento: Permite ordenar la colección de forma ascendente o descendente.
+### 1\. 📡 Modo 1: Lectura en Tiempo Real (Stateful)
 
-* Filtrado Avanzado: Acepta un array de objetos Filtros para realizar búsquedas en uno o varios campos. Es el único método que se debe usar para iniciar o reiniciar una consulta.
+Este modo está diseñado para listas de datos persistentes (feeds, dashboards, listas principales) que necesitan actualizarse en tiempo real.
 
-* cargarMasDocumentos(collectionName, paginacion, filtros?)
-Este método está diseñado para la paginación progresiva sin activar un listener. Su función es:
+  * **Tecnología:** `onSnapshot` (Listener en tiempo real).
+  * **Gestión de Estado:** **Stateful**. El servicio gestiona su propio estado interno a través de signals (`items`, `lastDoc`, `stateEnumRead`). Los componentes se suscriben a estos signals.
+  * **Métodos:** `obtenerDocumentos()` y `cargarMasDocumentos()`.
 
-Carga Controlada por el Usuario: Carga la siguiente tanda de documentos utilizando el cursor de la consulta anterior (lastDoc). Esto evita lecturas innecesarias y optimiza el costo en Firestore.
+### 2\. ⚡ Modo 2: Lectura "One-Shot" (Stateless)
 
-Mantenimiento de Filtros y Orden: La consulta de la siguiente página mantiene los filtros y el orden aplicados en la consulta inicial.
+Este modo está diseñado para consultas bajo demanda que no requieren una suscripción (como búsquedas o widgets).
 
-# Cómo Usar el ReadService en tus Componentes
-La simplicidad del ReadService se refleja en los componentes que lo consumen. 
-La estrategia es siempre la misma: inyectar el servicio y consumir sus señales públicas.
+  * **Tecnología:** `getDocs` (Lectura única `async/await`).
+  * **Gestión de Estado:** **Stateless**. El método **no modifica el estado interno** del servicio. Devuelve un `Promise` con los datos, y el componente que lo llama es responsable de gestionar su *propio* estado local.
+  * **Método:** `obtenerDocumentosPorFiltro()`.
 
-# 1. Configuración del Componente
-En cada componente, define las propiedades de configuración como el nombre de la colección y la paginación.
-Luego, inyecta el servicio y consume sus señales.
+-----
 
-TypeScript
+## ⚙️ Capacidades Clave del Servicio (API)
 
-        import { Component, inject, OnInit } from '@angular/core';
-        import { ReadService, Paginacion, Filtros } from '../../lidertechLibCentralModule/read.service';
-        import { StatesGlobal } from '../../states/states.global';
-        import { StatesEnum } from '../../states/states.enum';
-        import { Product } from '../product.interface';
+### Métodos Stateful (Tiempo Real)
+
+#### `obtenerDocumentos(collectionName, paginacion, filtros?)`
+
+Inicia un listener (`onSnapshot`) que actualiza el estado interno del servicio.
+
+  * **Uso:** Carga inicial, reinicio de filtros, ordenamiento.
+  * **Retorna:** `void`.
+  * **Actualiza Signals:** `items`, `lastDoc`, `hasMore`, `stateEnumRead`.
+
+#### `cargarMasDocumentos(collectionName, paginacion, filtros?)`
+
+Obtiene la siguiente página de resultados (`getDocs`) y la añade al signal `items`.
+
+  * **Uso:** Paginación ("Cargar más").
+  * **Retorna:** `Promise<void>`.
+  * **Actualiza Signals:** `items` (agrega), `lastDoc`, `hasMore`, `stateEnumRead`.
+
+### Método Stateless (Un Solo Disparo)
+
+#### `obtenerDocumentosPorFiltro(collectionName, filtros, limite?)`
+
+Ejecuta una lectura única (`getDocs`) y devuelve los resultados directamente.
+
+  * **Uso:** **`SearchComponent` (Buscadores)**, widgets, o cualquier lógica `async/await`.
+  * **Retorna:** `Promise<(T & { id: string })[]>`
+  * **NO actualiza signals.**
+
+-----
+
+## 📖 Ejemplos de Uso Práctico
+
+### Ejemplo 1: Modo Stateful (Lista en Tiempo Real)
+
+Este es el uso más común para mostrar listas. El componente (`ProductsComponent`) es "pasivo": inyecta el servicio y consume sus signals.
+
+**`products.component.ts`**
+
+```typescript
+import { Component, OnInit, signal, Signal, inject } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
+import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { StatesEnum } from '../states/states.enum';
+import { ReusableGridComponent } from '../../lidertechLibCentralModule/reusable-grid/reusable-grid.component';
+import { ReadService, Paginacion, Filtros } from '../../lidertechLibCentralModule/read.service';
+import { Product } from '../product.interface';
+
+@Component({
+  selector: 'app-products',
+  standalone: true,
+  imports: [
+    CommonModule,
+    ReusableGridComponent,
+    MatButtonModule,
+    MatCardModule,
+    MatProgressSpinnerModule
+  ],
+  template: `
+    <div class="box-responsive">
+      
+      @switch (estado()) {
         
-        @Component({ ... })
-        export class TuComponente implements OnInit {
-          private readService = inject(ReadService<Product>);
-          private statesGlobal = inject(StatesGlobal);
-        
-          // ✅ Propiedades de configuración
-          private coleccion = 'productos';
-          private paginacion: Paginacion = {
-            orderByField: 'creationDate',
-            orderDirection: 'desc',
-            itemsByPage: 10
-          };
-        
-          // ✅ Consumo directo de las señales del servicio
-          public productos = this.readService.items;
-          public estados = this.readService.states;
-          public paginando = this.readService.paginating;
-          public hayMas = this.readService.hasMore;
-          public StatesEnum = StatesEnum;
-        
-          ngOnInit(): void {
-            // Se inicia el listener aquí, en ngOnInit
-            this.readService.obtenerDocumentos(this.coleccion, this.paginacion);
-          }
-        }
-        Ejemplos de Uso Práctico
-        A. Paginación y Carga Progresiva
-        Este es el escenario más común. El componente solo necesita un botón que llame al método cargarMasDocumentos.
-        
-        TypeScript
-        
-        // En tu componente .ts
-        public cargarMas(): void {
-          this.readService.cargarMasDocumentos(this.coleccion, this.paginacion);
-        }
-        
-        // En tu template .html
-        @if (hayMas()) {
-          <button (click)="cargarMas()" [disabled]="paginando()">
-            Cargar más productos
-          </button>
-        }
+        @case (StatesEnum.LISTO) {
+          <app-reusable-grid [conector]="productos()">
+            @for (product of productos(); track product.id) {
+              <mat-card>
+                <img mat-card-image [src]="product.imageLink" [alt]="product.title">
+                <mat-card-header>
+                  <mat-card-title>{{ product.title | titlecase }}</mat-card-title>
+                  <mat-card-subtitle>{{ product.price | currency }}</mat-card-subtitle>
+                </mat-card-header>
+              </mat-card>
+            }
+          </app-reusable-grid>
 
-# B. Ordenamiento de Resultados y Lectura en Tiempo Real
-Para ordenar los productos, simplemente crea una función que llame a obtenerDocumentos con una nueva dirección de orden. 
-El listener se desuscribirá del anterior y se creará uno nuevo con la configuración actualizada, lo que mantendrá las actualizaciones en tiempo real.
-
-TypeScript
-
-        // En tu componente .ts
-        public ordenarPor(direction: 'asc' | 'desc'): void {
-          this.readService.obtenerDocumentos(
-            this.coleccion,
-            { ...this.paginacion, orderDirection: direction }
-          );
-        }
-        
-        // En tu template .html
-        <button (click)="ordenarPor('asc')">Ordenar Asc</button>
-        <button (click)="ordenarPor('desc')">Ordenar Desc</button>
-
-# C. Buscadores y Filtros Múltiples
-Para implementar una funcionalidad de búsqueda, solo necesitas pasar el parámetro filtros al método obtenerDocumentos. 
-Tu servicio se encargará de crear la consulta adecuada y de reiniciar el listener con los nuevos filtros.
-
-TypeScript
-
-        // En tu componente .ts
-        public buscar(termino: string): void {
-          const filtros = [
-            { field: 'nombre', operator: '==', value: termino }
-          ];
-          this.readService.obtenerDocumentos(
-            this.coleccion,
-            this.paginacion,
-            filtros
-          );
-        }
-        
-        // Para múltiples filtros
-        public buscarPorCategoriaYColor(categoria: string, color: string): void {
-          const filtros = [
-            { field: 'categoria', operator: '==', value: categoria },
-            { field: 'color', operator: '==', value: color }
-          ];
-          this.readService.obtenerDocumentos(
-            this.coleccion,
-            this.paginacion,
-            filtros
-          );
-        }
-
-
-# Conclusión
-El ReadService es una solución completa y robusta para la gestión de lecturas en tus aplicaciones. Centraliza toda la lógica de datos, reduce la complejidad de los componentes y garantiza la consistencia en el desarrollo. Al usar este servicio, puedes construir componentes simples y eficientes, enfocados en la interfaz de usuario, sabiendo que la gestión de datos se maneja de manera óptima y moderna.
-
-
-
-# EJEMPLO completo>
-
-Este componente utiliza tu servicio ReadService y ahora aplica tu convención de CSS para el contenedor principal.
-
-TypeScript
-
-        import { Component, OnInit, signal, Signal, inject } from '@angular/core';
-        import { CommonModule } from '@angular/common';
-        import { MatButtonModule } from '@angular/material/button';
-        import { StatesEnum } from '../states.enum';
-        import { ReusableGridComponent } from '../../lidertechLibCentralModule/reusable-grid/reusable-grid.component';
-        import { ReadService, Paginacion, Filtros } from '../../lidertechLibCentralModule/read.service';
-        import { StatesGlobal } from '../../states/states.global';
-        import { Product } from '../product.interface';
-        
-        @Component({
-          selector: 'app-products',
-          standalone: true,
-          imports: [
-            CommonModule,
-            ReusableGridComponent,
-            MatButtonModule
-          ],
-          template: `
-            <div class="box-4">
-              @if (states() === StatesEnum.LOADED) {
-                <app-reusable-grid
-                  [conector]="products()"
-                  [handsetCols]="signal(2)"
-                  [tabletCols]="signal(3)"
-                  [webCols]="signal(6)"
-                  [gutterSize]="signal('16px')"
-                  [rowHeight]="signal('1:1')"
-                >
-                  @for (product of products(); track product.id) {
-                    <mat-card>
-                      <img mat-card-image [src]="product.imageLink" [alt]="product.title">
-                      <mat-card-header>
-                        <mat-card-title>{{ product.title }}</mat-card-title>
-                        <mat-card-subtitle>{{ product.price | currency }}</mat-card-subtitle>
-                      </mat-card-header>
-                      <mat-card-content>
-                        <p>{{ product.description }}</p>
-                      </mat-card-content>
-                    </mat-card>
-                  }
-                </app-reusable-grid>
-              } @else if (states() === StatesEnum.LOADING) {
-                <span>Cargando productos...</span>
-              } @else if (states() === StatesEnum.ERROR) {
-                <span>Error al cargar los productos.</span>
-              } @else if (states() === StatesEnum.EMPTY) {
-                <span>No se encontraron productos.</span>
+          @if (hayMas()) {
+            <button mat-raised-button (click)="cargarMas()">
+              @if (estado() === StatesEnum.PAGINANDO) {
+                <mat-spinner diameter="24"></mat-spinner>
+              } @else {
+                Cargar Más
               }
-            </div>
-          `,
-        })
-        export class ProductsComponent implements OnInit {
-        
-          private readonly readService = inject(ReadService<Product>);
-          private readonly statesGlobal = inject(StatesGlobal);
-        
-          readonly states: Signal<StatesEnum> = this.statesGlobal.states;
-          readonly products: Signal<Product[]> = this.readService.items;
-          readonly hasMore: Signal<boolean> = this.readService.hasMore;
-        
-          private readonly paginacion: Paginacion = {
-            orderByField: 'creationDate',
-            orderDirection: 'desc',
-            itemsByPage: 10
-          };
-        
-          private readonly filtros: Filtros[] = [
-            { field: 'availability', operator: '==', value: 'in stock' }
-          ];
-        
-          ngOnInit(): void {
-            this.readService.obtenerDocumentos('products', this.paginacion, this.filtros);
-          }
-        
-          public async cargarMas(): Promise<void> {
-            await this.readService.cargarMasDocumentos('products', this.paginacion, this.filtros);
+            </button>
           }
         }
-
-
-
-
-
-
-Ahora creame un informe mejorado del servicio y que incluya el ejemplo de uso del componente basado en este ultimo componente asi tendremos un informe full completo
-
-
-
-Informe Técnico Mejorado: ReadService
-El ReadService es el servicio de lectura definitivo para todos tus proyectos Lidertech, diseñado para interactuar con Cloud Firestore de manera genérica, eficiente y escalable. Su arquitectura centralizada elimina la lógica compleja de los componentes, permitiendo un desarrollo más rápido y consistente.
-
-Este informe incluye una descripción completa del servicio y un ejemplo de uso en un componente, ajustado a tus convenciones de box.css.
-
-Capacidades Clave del Servicio
-El servicio se basa en dos métodos principales, que juntos cubren todas las necesidades de lectura de una aplicación moderna:
-
-obtenerDocumentos(collectionName, paginacion, filtros?)
-Este es el método de consulta principal. Utiliza onSnapshot para proporcionar actualizaciones en tiempo real. Se usa para:
-
-Lectura en Tiempo Real: Establece un listener que se actualiza automáticamente cada vez que los datos cambian en Firestore.
-
-Carga Inicial: Obtiene la primera página de documentos.
-
-Ordenamiento: Permite ordenar la colección de forma ascendente o descendente.
-
-Filtrado Avanzado: Acepta un array de objetos Filtros para realizar búsquedas en uno o varios campos. Es el único método que se debe usar para iniciar o reiniciar una consulta.
-
-cargarMasDocumentos(collectionName, paginacion, filtros?)
-Este método está diseñado para la paginación progresiva sin activar un listener. Su función es:
-
-Carga Controlada por el Usuario: Carga la siguiente tanda de documentos utilizando el cursor de la consulta anterior (lastDoc). Esto evita lecturas innecesarias y optimiza el costo en Firestore.
-
-Mantenimiento de Filtros y Orden: La consulta de la siguiente página mantiene los filtros y el orden aplicados en la consulta inicial.
-
-Cómo Usar el ReadService en tus Componentes
-La simplicidad del ReadService se refleja en los componentes que lo consumen. La estrategia es siempre la misma: inyectar el servicio y consumir sus señales públicas.
-
-1. Configuración del Componente
-En cada componente, define las propiedades de configuración como el nombre de la colección y la paginación. Luego, inyecta el servicio y consume sus señales.
-
-TypeScript
-
-        import { Component, inject, OnInit } from '@angular/core';
-        import { ReadService, Paginacion, Filtros } from '../../lidertechLibCentralModule/read.service';
-        import { StatesGlobal } from '../../states/states.global';
-        import { StatesEnum } from '../../states/states.enum';
-        import { Product } from '../product.interface';
         
-        @Component({ ... })
-        export class TuComponente implements OnInit {
-          private readService = inject(ReadService<Product>);
-          private statesGlobal = inject(StatesGlobal);
-        
-          // ✅ Propiedades de configuración
-          private coleccion = 'productos';
-          private paginacion: Paginacion = {
-            orderByField: 'creationDate',
-            orderDirection: 'desc',
-            itemsByPage: 10
-          };
-        
-          // ✅ Consumo directo de las señales del servicio
-          public productos = this.readService.items;
-          public estados = this.readService.states;
-          public paginando = this.readService.paginating;
-          public hayMas = this.readService.hasMore;
-          public StatesEnum = StatesEnum;
-        
-          ngOnInit(): void {
-            // Se inicia el listener aquí, en ngOnInit
-            this.readService.obtenerDocumentos(this.coleccion, this.paginacion);
-          }
+        @case (StatesEnum.CARGANDO) {
+          <span>Cargando productos...</span>
         }
-
-Ejemplo de Uso Completo del Componente
-Aquí tienes el código completo de un componente que implementa el servicio, incluyendo la plantilla (template), usando tu convención de box.css y mostrando un MatCard dentro de tu componente de cuadrícula reutilizable.
-
-TypeScript
-
-        import { Component, OnInit, signal, Signal, inject } from '@angular/core';
-        import { CommonModule } from '@angular/common';
-        import { MatButtonModule } from '@angular/material/button';
-        import { MatCardModule } from '@angular/material/card';
-        import { StatesEnum } from '../states.enum';
-        import { ReusableGridComponent } from '../../lidertechLibCentralModule/reusable-grid/reusable-grid.component';
-        import { ReadService, Paginacion, Filtros } from '../../lidertechLibCentralModule/read.service';
-        import { StatesGlobal } from '../../states/states.global';
-        import { Product } from '../product.interface';
-        
-        @Component({
-          selector: 'app-products',
-          standalone: true,
-          imports: [
-            CommonModule,
-            ReusableGridComponent,
-            MatButtonModule,
-            MatCardModule
-          ],
-          template: `
-            <div class="box-4">
-              @if (states() === StatesEnum.LOADED) {
-                <app-reusable-grid
-                  [conector]="products()"
-                  [handsetCols]="signal(2)"
-                  [tabletCols]="signal(3)"
-                  [webCols]="signal(6)"
-                  [gutterSize]="signal('16px')"
-                  [rowHeight]="signal('1:1')"
-                >
-                  @for (product of products(); track product.id) {
-                    <mat-card>
-                      <img mat-card-image [src]="product.imageLink" [alt]="product.title">
-                      <mat-card-header>
-                        <mat-card-title>{{ product.title }}</mat-card-title>
-                        <mat-card-subtitle>{{ product.price | currency }}</mat-card-subtitle>
-                      </mat-card-header>
-                      <mat-card-content>
-                        <p>{{ product.description }}</p>
-                      </mat-card-content>
-                    </mat-card>
-                  }
-                </app-reusable-grid>
-              } @else if (states() === StatesEnum.LOADING) {
-                <span>Cargando productos...</span>
-              } @else if (states() === StatesEnum.ERROR) {
-                <span>Error al cargar los productos.</span>
-              } @else if (states() === StatesEnum.EMPTY) {
-                <span>No se encontraron productos.</span>
-              }
-            </div>
-          `,
-        })
-        export class ProductsComponent implements OnInit {
-        
-          private readonly readService = inject(ReadService<Product>);
-          private readonly statesGlobal = inject(StatesGlobal);
-        
-          readonly states: Signal<StatesEnum> = this.statesGlobal.states;
-          readonly products: Signal<Product[]> = this.readService.items;
-          readonly hasMore: Signal<boolean> = this.readService.hasMore;
-        
-          private readonly paginacion: Paginacion = {
-            orderByField: 'creationDate',
-            orderDirection: 'desc',
-            itemsByPage: 10
-          };
-        
-          private readonly filtros: Filtros[] = [
-            { field: 'availability', operator: '==', value: 'in stock' }
-          ];
-        
-          ngOnInit(): void {
-            this.readService.obtenerDocumentos('products', this.paginacion, this.filtros);
-          }
-        
-          public async cargarMas(): Promise<void> {
-            await this.readService.cargarMasDocumentos('products', this.paginacion, this.filtros);
-          }
+        @case (StatesEnum.ERROR) {
+          <span>Error al cargar los productos.</span>
         }
+        @case (StatesEnum.SIN_RESULTADOS) {
+          <span>No se encontraron productos.</span>
+        }
+      }
+    </div>
+  `
+})
+export class ProductsComponent implements OnInit {
+
+  // Inyectamos el servicio genérico
+  private readonly readService = inject(ReadService<Product>);
+
+  // Consumimos los signals del SERVICIO
+  public readonly estado: Signal<StatesEnum> = this.readService.stateEnumRead;
+  public readonly productos: Signal<Product[]> = this.readService.items;
+  public readonly hayMas: Signal<boolean> = this.readService.hasMore;
+  public readonly StatesEnum = StatesEnum; // Exponemos el Enum
+
+  private readonly coleccion = 'products';
+  private readonly paginacion: Paginacion = {
+    orderByField: 'creationDate',
+    orderDirection: 'desc',
+    itemsByPage: 10
+  };
+  
+  private readonly filtros: Filtros[] = [
+    { field: 'availability', operator: '==', value: 'in stock' }
+  ];
+
+  ngOnInit(): void {
+    // 1. Inicia el listener stateful
+    this.readService.obtenerDocumentos(this.coleccion, this.paginacion, this.filtros);
+  }
+
+  public async cargarMas(): Promise<void> {
+    // 2. Llama al método de paginación
+    await this.readService.cargarMasDocumentos(this.coleccion, this.paginacion, this.filtros);
+  }
+}
+```
+
+-----
+
+### Ejemplo 2: Modo Stateless (Buscador "One-Shot")
+
+Este es el uso correcto para el `SearchComponent`. El componente es "activo": maneja su **propio estado local** y solo pide datos al servicio.
+
+**`search.component.ts` (Fragmento del método de búsqueda)**
+
+```typescript
+import { StatesEnum } from 'ruta/a/states/states.enum';
+import { ReadService, Filtros } from 'ruta/a/services/read.service';
+
+@Component({ /* ... */ })
+export class SearchComponent {
+  
+  private readService = inject(ReadService);
+
+  // El componente maneja SU PROPIO estado local
+  public estadoActual: WritableSignal<StatesEnum> = signal(StatesEnum.INICIAL);
+  public resultados: WritableSignal<any[]> = signal([]);
+  public readonly stateEnum = StatesEnum;
+
+  async ejecutarBusqueda(consulta: string) {
+    
+    // 1. El componente gestiona su estado local
+    this.estadoActual.set(StatesEnum.CARGANDO);
+    
+    // 2. Prepara los filtros (aplicando la Convención Maestra de Datos)
+    const consultaMinusculas = consulta.toLowerCase();
+    const filtrosBusqueda: Filtros[] = [
+      { field: 'nombre', operator: '>=', value: consultaMinusculas },
+      { field: 'nombre', operator: '<=', value: consultaMinusculas + '\uf8ff' }
+    ];
+
+    try {
+      // 3. Llama al método stateless y ESPERA (await) la respuesta
+      const data = await this.readService.obtenerDocumentosPorFiltro(
+        'productos',
+        filtrosBusqueda,
+        10 // Límite de resultados
+      );
+
+      // 4. Actualiza el estado LOCAL con la respuesta
+      this.resultados.set(data);
+      this.estadoActual.set(data.length > 0 ? StatesEnum.LISTO : StatesEnum.VACIO);
+
+    } catch (error) {
+      this.estadoActual.set(StatesEnum.ERROR);
+    }
+  }
+}
+```
+
+### Conclusión
+
+El `ReadService`, con su **arquitectura dual**, es una solución completa y robusta. Separa limpiamente la lógica de las listas en tiempo real (`obtenerDocumentos`) de las consultas bajo demanda (`obtenerDocumentosPorFiltro`). Esto garantiza que el `SearchComponent` funcione eficientemente sin interferir con las listas de productos, logrando una cohesión total en la arquitectura Lidertech.
